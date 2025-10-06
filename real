@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>수요 기반 MRP(DDMRP) 인터랙티브 대시보드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Calm Neutrals -->
+    <!-- Application Structure Plan: A single-page, thematic dashboard structure guides the user through a narrative: 1. The Problem (visualizing the Bullwhip Effect), 2. The Paradigm Shift (comparing MRP vs. DDMRP), 3. How It Works (interactive buffer simulation), and 4. The Impact (quantitative results). This structure was chosen to transform the static report into an engaging, educational experience. A sticky navigation bar allows for easy exploration, making complex SCM concepts tangible and memorable for a competition setting. -->
+    <!-- Visualization & Content Choices: 
+        - Bullwhip Effect (Problem): Report Info -> Goal: Demonstrate forecast amplification -> Viz: Interactive Line Chart (Chart.js) -> Interaction: User slides customer demand to see exaggerated upstream orders -> Justification: More impactful than a static image.
+        - MRP vs DDMRP (Solution): Report Info -> Goal: Explain the core concept shift -> Viz: HTML/Tailwind diagram -> Interaction: User clicks on BOM nodes to place a "buffer," visually showing how it absorbs shock -> Justification: Makes the "decoupling" concept intuitive.
+        - Buffer Simulation (How it Works): Report Info -> Goal: Demystify DDMRP mechanics -> Viz: Interactive HTML/CSS buffer funnel + data table -> Interaction: User inputs inventory/demand numbers to see the Net Flow level and priority change in real-time -> Justification: Hands-on simulation is the best way to teach the core logic.
+        - Expected Benefits (Impact): Report Info -> Goal: Prove the business value -> Viz: Bar Charts (Chart.js) comparing Before/After DDMRP KPIs -> Interaction: Hover for details -> Justification: Clear, quantitative summary of the solution's value.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #F8F9FA;
+            color: #343A40;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+        .nav-link {
+            transition: all 0.3s;
+        }
+        .nav-link.active {
+            color: #1D4ED8;
+            border-bottom-color: #1D4ED8;
+        }
+        .buffer-zone {
+            transition: all 0.3s ease-in-out;
+        }
+        .net-flow-indicator {
+            transition: bottom 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50">
+        <nav class="container mx-auto px-6 py-3">
+            <div class="flex justify-between items-center">
+                <h1 class="text-xl font-bold text-gray-800">SCM 혁신: DDMRP 도입 방안</h1>
+                <div class="hidden md:flex space-x-8">
+                    <a href="#problem" class="nav-link text-gray-600 hover:text-blue-600 border-b-2 border-transparent pb-1">문제 인식</a>
+                    <a href="#solution" class="nav-link text-gray-600 hover:text-blue-600 border-b-2 border-transparent pb-1">해결 방안</a>
+                    <a href="#simulation" class="nav-link text-gray-600 hover:text-blue-600 border-b-2 border-transparent pb-1">작동 원리</a>
+                    <a href="#impact" class="nav-link text-gray-600 hover:text-blue-600 border-b-2 border-transparent pb-1">기대 효과</a>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main class="container mx-auto px-6 py-12">
+        
+        <!-- Section 1: Problem -->
+        <section id="problem" class="mb-24 scroll-mt-20">
+            <h2 class="text-3xl font-bold text-center mb-4 text-gray-800">무엇이 문제일까요?</h2>
+            <p class="max-w-3xl mx-auto text-center text-gray-600 mb-12">
+                전통적인 자재소요량계획(MRP)은 '수요 예측'에 기반합니다. 하지만 예측이 조금만 빗나가도 공급망 전체가 흔들리는 '채찍 효과(Bullwhip Effect)'가 발생하여 막대한 재고 비용과 결품 손실을 유발합니다. 아래 시뮬레이터로 직접 확인해보세요.
+            </p>
+            <div class="bg-white p-8 rounded-xl shadow-lg">
+                <div class="chart-container">
+                    <canvas id="bullwhipChart"></canvas>
+                </div>
+                <div class="mt-8 text-center">
+                    <label for="demandSlider" class="block font-medium text-gray-700 mb-2">최종 고객 수요 변동률 조정</label>
+                    <div class="flex items-center justify-center space-x-4">
+                        <span class="text-sm text-gray-500">-10%</span>
+                        <input id="demandSlider" type="range" min="-10" max="10" value="0" class="w-64">
+                        <span class="text-sm text-gray-500">+10%</span>
+                        <span id="demandValue" class="font-bold text-blue-600 w-12 text-left">0%</span>
+                    </div>
+                    <p class="text-sm mt-4 text-gray-500">슬라이더를 움직여 고객 수요에 작은 변화를 주었을 때, 공급망 상류로 갈수록 주문량 변동이 어떻게 증폭되는지 관찰해보세요.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: Solution -->
+        <section id="solution" class="mb-24 scroll-mt-20">
+            <h2 class="text-3xl font-bold text-center mb-4 text-gray-800">'예측'에서 '대응'으로의 전환</h2>
+             <p class="max-w-3xl mx-auto text-center text-gray-600 mb-12">
+                저희는 불확실한 예측에 의존하는 대신, 실제 수요에 민첩하게 대응하는 '수요 기반 MRP(DDMRP)'를 제안합니다. 핵심은 공급망의 전략적 위치에 '재고 버퍼'를 두어 변동성을 흡수하는 것입니다.
+            </p>
+            <div class="grid md:grid-cols-2 gap-8 items-center">
+                <div class="bg-white p-8 rounded-xl shadow-lg">
+                    <h3 class="text-xl font-bold text-center mb-4">전통적 MRP vs DDMRP</h3>
+                    <div class="flex justify-around">
+                        <div class="text-center p-4">
+                             <h4 class="font-semibold text-lg">전통적 MRP</h4>
+                             <p class="text-sm text-gray-500 mt-2">모든 계획이 <br>하나의 긴 사슬처럼 연결</p>
+                             <div class="text-4xl mt-4">⛓️</div>
+                             <p class="mt-4 text-red-600 font-medium">하나가 끊어지면 전체가 마비 (채찍 효과 발생)</p>
+                        </div>
+                         <div class="border-l"></div>
+                        <div class="text-center p-4">
+                            <h4 class="font-semibold text-lg">DDMRP</h4>
+                            <p class="text-sm text-gray-500 mt-2">전략적 지점에 버퍼(완충재) 설치</p>
+                            <div class="text-4xl mt-4">🔗📦🔗</div>
+                            <p class="mt-4 text-green-600 font-medium">충격을 흡수하여<br> 안정성 확보</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white p-8 rounded-xl shadow-lg">
+                    <h3 class="text-xl font-bold text-center mb-4">인터랙티브 BOM: 디커플링 포인트 설정</h3>
+                    <p class="text-center text-sm text-gray-500 mb-4">BOM(자재명세서)에서 변동성을 차단할 최적의 위치(부품)를 클릭하여 버퍼(📦)를 설정해보세요.</p>
+                     <div id="bom-diagram" class="space-y-4 flex flex-col items-center text-sm">
+                        <div data-item="P1" class="bom-item border-2 border-gray-400 bg-gray-100 rounded-md px-4 py-2 cursor-pointer w-32 text-center">완제품: P1</div>
+                        <div class="w-px h-6 bg-gray-400"></div>
+                        <div class="flex space-x-12">
+                            <div class="flex flex-col items-center space-y-4">
+                                <div data-item="M1" class="bom-item border-2 border-blue-400 bg-blue-100 rounded-md px-4 py-2 cursor-pointer w-32 text-center">반제품: M1</div>
+                                <div class="w-px h-6 bg-gray-400"></div>
+                                <div data-item="B1" class="bom-item border-2 border-green-400 bg-green-100 rounded-md px-4 py-2 cursor-pointer w-32 text-center">구매품: B1</div>
+                            </div>
+                            <div class="flex flex-col items-center space-y-4">
+                                <div data-item="M2" class="bom-item border-2 border-blue-400 bg-blue-100 rounded-md px-4 py-2 cursor-pointer w-32 text-center">반제품: M2</div>
+                                 <div class="w-px h-6 bg-gray-400"></div>
+                                 <div data-item="B2" class="bom-item border-2 border-green-400 bg-green-100 rounded-md px-4 py-2 cursor-pointer w-32 text-center">구매품: B2</div>
+                            </div>
+                        </div>
+                        <p id="bom-feedback" class="text-center mt-4 h-6 text-blue-600 font-medium"></p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 3: Simulation -->
+        <section id="simulation" class="mb-24 scroll-mt-20">
+            <h2 class="text-3xl font-bold text-center mb-4 text-gray-800">어떻게 작동하나요?</h2>
+            <p class="max-w-3xl mx-auto text-center text-gray-600 mb-12">
+                DDMRP는 '순 흐름(Net Flow)' 공식을 통해 버퍼의 상태를 실시간으로 파악하고, 신호등처럼 직관적인 3색 존(Zone)으로 보충 시점과 우선순위를 결정합니다. 아래 시뮬레이터로 직접 경험해보세요.
+            </p>
+            <div class="bg-white p-8 rounded-xl shadow-lg">
+                <div class="grid md:grid-cols-3 gap-8">
+                    <div class="md:col-span-1">
+                        <h3 class="text-xl font-bold mb-4">입력값 조정</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label for="onHand" class="block text-sm font-medium text-gray-700">현재고 (On-Hand)</label>
+                                <input type="number" id="onHand" value="130" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                            </div>
+                            <div>
+                                <label for="onOrder" class="block text-sm font-medium text-gray-700">입고예정 (On-Order)</label>
+                                <input type="number" id="onOrder" value="50" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                            </div>
+                            <div>
+                                <label for="demand" class="block text-sm font-medium text-gray-700">수요 (Demand)</label>
+                                <input type="number" id="demand" value="20" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                            </div>
+                        </div>
+                        <div class="mt-6 bg-gray-100 p-4 rounded-lg text-center">
+                            <p class="text-sm font-medium text-gray-500">순 흐름 (Net Flow)</p>
+                            <p class="text-sm text-gray-500">(현재고 + 입고예정 - 수요)</p>
+                            <p id="netFlowValue" class="text-3xl font-bold text-blue-600 mt-2">160</p>
+                        </div>
+                    </div>
+                    <div class="md:col-span-2 flex flex-col md:flex-row items-center justify-center gap-8">
+                        <div class="relative w-48 h-80 flex flex-col-reverse" id="buffer-container">
+                            <div class="buffer-zone bg-red-500/80" id="red-zone" style="height: 26.5%;"></div>
+                            <div class="buffer-zone bg-yellow-500/80" id="yellow-zone" style="height: 42.1%;"></div>
+                            <div class="buffer-zone bg-green-500/80" id="green-zone" style="height: 31.4%;"></div>
+                            <div id="net-flow-indicator-wrapper" class="absolute w-full h-full bottom-0">
+                                <div id="net-flow-indicator" class="absolute w-full h-1 bg-blue-700 -ml-2" style="bottom: 56.14%;">
+                                    <div class="absolute -right-2 -top-2 w-4 h-4 rounded-full bg-blue-700"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-left">
+                             <h4 class="font-bold text-lg mb-4">버퍼 레벨 개요</h4>
+                            <div class="flex items-center space-x-3 mb-2">
+                                <div class="w-4 h-4 rounded bg-green-500"></div>
+                                <span class="font-medium">Green Zone (최대 재고): <span id="green-val">140</span></span>
+                            </div>
+                            <div class="flex items-center space-x-3 mb-2">
+                                <div class="w-4 h-4 rounded bg-yellow-500"></div>
+                                <span class="font-medium">Yellow Zone (재주문점): <span id="yellow-val">200</span></span>
+                            </div>
+                            <div class="flex items-center space-x-3 mb-2">
+                                <div class="w-4 h-4 rounded bg-red-500"></div>
+                                <span class="font-medium">Red Zone (안전 재고): <span id="red-val">75</span></span>
+                            </div>
+                             <div class="border-t my-4"></div>
+                             <p class="text-lg font-bold">총 버퍼 크기: <span id="total-buffer">415</span></p>
+                             <p id="bufferStatus" class="mt-4 text-lg font-bold h-12"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 4: Impact -->
+        <section id="impact" class="scroll-mt-20">
+            <h2 class="text-3xl font-bold text-center mb-4 text-gray-800">기대 효과: 무엇이 달라질까요?</h2>
+             <p class="max-w-3xl mx-auto text-center text-gray-600 mb-12">
+                DDMRP 도입은 단순한 기능 개선을 넘어, 기업의 핵심 경쟁력을 강화하는 전략적 혁신입니다. 실제 도입 기업들의 사례를 바탕으로 한 정량적 기대 효과는 다음과 같습니다.
+            </p>
+            <div class="bg-white p-8 rounded-xl shadow-lg">
+                <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+                    <div class="text-center">
+                        <h4 class="font-bold text-lg text-gray-700">재고 수준</h4>
+                        <p class="text-4xl font-bold text-green-600 my-2">30-45%↓</p>
+                        <p class="text-sm text-gray-500">과잉 재고를 방지하고<br>운영 비용을 절감합니다.</p>
+                    </div>
+                    <div class="text-center">
+                        <h4 class="font-bold text-lg text-gray-700">납기 준수율</h4>
+                        <p class="text-4xl font-bold text-blue-600 my-2">99%↑</p>
+                        <p class="text-sm text-gray-500">고객 만족도와<br>신뢰도를 향상시킵니다.</p>
+                    </div>
+                    <div class="text-center">
+                        <h4 class="font-bold text-lg text-gray-700">결품률</h4>
+                        <p class="text-4xl font-bold text-green-600 my-2">60-80%↓</p>
+                        <p class="text-sm text-gray-500">판매 기회 손실을<br>최소화합니다.</p>
+                    </div>
+                    <div class="text-center">
+                        <h4 class="font-bold text-lg text-gray-700">계획 수립 시간</h4>
+                        <p class="text-4xl font-bold text-blue-600 my-2">50%+↓</p>
+                        <p class="text-sm text-gray-500">불필요한 재계획을 줄여<br>업무 효율성을 높입니다.</p>
+                    </div>
+                </div>
+                <div class="mt-12">
+                     <div class="chart-container" style="height: 300px; max-height: 350px;">
+                        <canvas id="impactChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-white mt-16 border-t">
+        <div class="container mx-auto px-6 py-4 text-center text-gray-500">
+            <p>&copy; 2025 공사다망 팀. All Rights Reserved.</p>
+        </div>
+    </footer>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Navigation scroll behavior
+            const navLinks = document.querySelectorAll('.nav-link');
+            const sections = document.querySelectorAll('section');
+
+            const observerOptions = {
+                root: null,
+                rootMargin: '0px',
+                threshold: 0.4
+            };
+
+            const observer = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        navLinks.forEach(link => {
+                            link.classList.toggle('active', link.getAttribute('href').substring(1) === entry.target.id);
+                        });
+                    }
+                });
+            }, observerOptions);
+
+            sections.forEach(section => {
+                observer.observe(section);
+            });
+            
+            navLinks.forEach(anchor => {
+                anchor.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    document.querySelector(this.getAttribute('href')).scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                });
+            });
+
+            // Section 1: Bullwhip Effect Chart
+            const bullwhipCtx = document.getElementById('bullwhipChart').getContext('2d');
+            const initialData = {
+                labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6', 'Week 7', 'Week 8'],
+                customer: [100, 102, 98, 100, 105, 95, 100, 103],
+            };
+
+            function generateUpstreamData(customerData, factor, lag) {
+                let upstreamData = [];
+                for (let i = 0; i < customerData.length; i++) {
+                    let base = i > lag ? customerData[i - lag] : 100;
+                    let noise = (Math.random() - 0.5) * factor;
+                    upstreamData.push(Math.round(base * (1 + noise)));
+                }
+                return upstreamData;
+            }
+
+            let bullwhipChart = new Chart(bullwhipCtx, {
+                type: 'line',
+                data: {
+                    labels: initialData.labels,
+                    datasets: [{
+                        label: '고객 수요',
+                        data: initialData.customer,
+                        borderColor: '#3B82F6',
+                        backgroundColor: '#3B82F6_33',
+                        tension: 0.1,
+                        borderWidth: 3
+                    }, {
+                        label: '소매점 주문',
+                        data: generateUpstreamData(initialData.customer, 0.1, 1),
+                        borderColor: '#FBBF24',
+                        backgroundColor: '#FBBF24_33',
+                        tension: 0.1,
+                        borderWidth: 2
+                    }, {
+                        label: '제조사 생산',
+                        data: generateUpstreamData(initialData.customer, 0.3, 2),
+                        borderColor: '#EF4444',
+                        backgroundColor: '#EF4444_33',
+                        tension: 0.1,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: { display: true, text: '수량' }
+                        }
+                    },
+                    plugins: {
+                        title: { display: true, text: '수요 변동에 따른 공급망 주문량 증폭 현상' },
+                        tooltip: { mode: 'index', intersect: false }
+                    }
+                }
+            });
+
+            const demandSlider = document.getElementById('demandSlider');
+            const demandValue = document.getElementById('demandValue');
+            demandSlider.addEventListener('input', (e) => {
+                const sliderValue = parseInt(e.target.value);
+                demandValue.textContent = `${sliderValue}%`;
+                
+                const newCustomerData = initialData.customer.map(d => d * (1 + sliderValue / 100));
+                bullwhipChart.data.datasets[0].data = newCustomerData;
+                bullwhipChart.data.datasets[1].data = generateUpstreamData(newCustomerData, 0.1, 1);
+                bullwhipChart.data.datasets[2].data = generateUpstreamData(newCustomerData, 0.3, 2);
+                bullwhipChart.update();
+            });
+
+            // Section 2: BOM Interaction
+            const bomItems = document.querySelectorAll('.bom-item');
+            const bomFeedback = document.getElementById('bom-feedback');
+            let bufferedItem = null;
+            bomItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    bomItems.forEach(i => {
+                        i.innerHTML = i.innerHTML.replace(' 📦', '');
+                        i.classList.remove('ring-4', 'ring-offset-2', 'ring-blue-500');
+                    });
+                    const itemName = item.dataset.item;
+                    item.innerHTML += ' 📦';
+                    item.classList.add('ring-4', 'ring-offset-2', 'ring-blue-500');
+                    bufferedItem = itemName;
+                    bomFeedback.textContent = `${itemName}에 버퍼를 설정하여 수요 변동성을 차단합니다.`;
+                });
+            });
+
+            // Section 3: Buffer Simulation
+            const onHandInput = document.getElementById('onHand');
+            const onOrderInput = document.getElementById('onOrder');
+            const demandInput = document.getElementById('demand');
+            const netFlowValueEl = document.getElementById('netFlowValue');
+            const bufferStatusEl = document.getElementById('bufferStatus');
+            const netFlowIndicator = document.getElementById('net-flow-indicator');
+
+            const redZoneEl = document.getElementById('red-zone');
+            const yellowZoneEl = document.getElementById('yellow-zone');
+            const greenZoneEl = document.getElementById('green-zone');
+            
+            const redVal = 75, yellowVal = 200, greenVal = 140;
+            const totalBuffer = redVal + yellowVal + greenVal;
+
+            function updateBuffer() {
+                const onHand = parseInt(onHandInput.value) || 0;
+                const onOrder = parseInt(onOrderInput.value) || 0;
+                const demand = parseInt(demandInput.value) || 0;
+
+                const netFlow = onHand + onOrder - demand;
+                netFlowValueEl.textContent = netFlow;
+                
+                const topOfRed = redVal;
+                const topOfYellow = redVal + yellowVal;
+                
+                let status = '';
+                let color = '';
+
+                if (netFlow <= topOfRed) {
+                    status = '🚨 재고 위험! 즉시 보충 필요 (Red Zone)';
+                    color = 'text-red-600';
+                } else if (netFlow <= topOfYellow) {
+                    status = '⚠️ 재고 보충 필요 (Yellow Zone)';
+                    color = 'text-yellow-600';
+                } else {
+                    status = '✅ 재고 적정 수준 (Green Zone)';
+                    color = 'text-green-600';
+                }
+                bufferStatusEl.textContent = status;
+                bufferStatusEl.className = `mt-4 text-lg font-bold h-12 ${color}`;
+
+                const netFlowPercentage = Math.max(0, Math.min(100, (netFlow / totalBuffer) * 100));
+                netFlowIndicator.style.bottom = `${netFlowPercentage}%`;
+            }
+
+            [onHandInput, onOrderInput, demandInput].forEach(input => {
+                input.addEventListener('input', updateBuffer);
+            });
+            updateBuffer(); // Initial call
+            
+            // Section 4: Impact Chart
+            const impactCtx = document.getElementById('impactChart').getContext('2d');
+            new Chart(impactCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['재고 수준', '납기 준수율', '결품률'],
+                    datasets: [{
+                        label: '전통적 MRP',
+                        data: [100, 90, 15],
+                        backgroundColor: '#9CA3AF',
+                    }, {
+                        label: 'DDMRP 도입 후',
+                        data: [60, 99, 3],
+                        backgroundColor: '#3B82F6',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: '성과 지표 (%)' }
+                        }
+                    },
+                    plugins: {
+                        title: { display: true, text: 'DDMRP 도입 전후 핵심 성과 지표(KPI) 비교' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y + '%';
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
